@@ -24,6 +24,10 @@ Homepage = "https://github.com/marcelo1195/Upload-Arsenal"
 
 [project.scripts]
 upload-arsenal = "upload_arsenal.cli:main"
+upload-arsenal-upload = "upload_arsenal.helpers.uploader:main"
+upload-arsenal-callback = "upload_arsenal.helpers.callback:main"
+upload-arsenal-hunt = "upload_arsenal.helpers.hunter:main"
+upload-arsenal-export = "upload_arsenal.helpers.export_req:main"
 
 [tool.setuptools.packages.find]
 include = ["upload_arsenal*"]
