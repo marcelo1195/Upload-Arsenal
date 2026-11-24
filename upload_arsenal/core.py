@@ -123,7 +123,7 @@ TARGETS: dict[str, Target] = {
     ),
     "tomcat-java": Target(
         "tomcat-java", "Tomcat / Java servlet container",
-        ("java",),
+        ("jsp",),
         ("jsp", "jspx", "war", "png", "jpg", "gif", "svg", "pdf"),
         trailing=(".", "%00"),
     ),
