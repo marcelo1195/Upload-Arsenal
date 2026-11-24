@@ -1,0 +1,12 @@
+# Generated suites
+file_upload_suite/
+*.egg-info/
+build/
+dist/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/

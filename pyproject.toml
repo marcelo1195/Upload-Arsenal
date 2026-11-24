@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "upload-arsenal"
+version = "2.0.0"
+description = "File-upload security test-suite generator for authorized pentest, bug bounty and CTF use."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "GPL-3.0-or-later" }
+authors = [{ name = "marcelo1195" }]
+keywords = ["security", "pentest", "bugbounty", "ctf", "file-upload", "payloads"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "Topic :: Security",
+    "Programming Language :: Python :: 3",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/marcelo1195/Upload-Arsenal"
+
+[project.scripts]
+upload-arsenal = "upload_arsenal.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["upload_arsenal*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
