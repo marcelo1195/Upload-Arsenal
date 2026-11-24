@@ -49,6 +49,28 @@ def test_apache_php_target_only_php(tmp_path):
     assert langs <= {"php"}
 
 
+def test_server_side_targets_emit_executable_poc(tmp_path):
+    """Regression: the IIS and Tomcat sinks must emit a code-exec PoC in their
+    native server-side syntax, not a non-executable class saved with a .jsp/
+    .aspx name (and IIS previously emitted no code payload at all)."""
+    expected = {
+        "iis-aspnet": ("aspx", "Response.Write"),
+        "tomcat-java": ("jsp", "out.println"),
+    }
+    for target, (lang, needle) in expected.items():
+        ctx = core.Context(
+            profile=core.PROFILES["bugbounty"], target=core.TARGETS[target],
+            languages=core.TARGETS[target].languages,
+        )
+        res = generator.run(ctx)
+        pocs = [a for a in res.artifacts if a.technique == "poc"]
+        assert pocs, f"{target} emitted no PoC payload"
+        assert {a.language for a in pocs} == {lang}
+        body = pocs[0].data.decode("utf-8", "replace")
+        assert needle in body
+        assert "code execution confirmed" in body
+
+
 def test_only_filter(tmp_path):
     ctx = _ctx()
     res = generator.run(ctx, only={"param-fuzz"})
