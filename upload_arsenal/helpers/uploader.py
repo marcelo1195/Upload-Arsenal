@@ -68,8 +68,7 @@ def _apply_url_override(req: rawhttp.RawRequest, url: str) -> None:
     from urllib.parse import urlsplit
     u = urlsplit(url if "://" in url else "https://" + url)
     req.scheme = u.scheme.lower()
-    req.host, req.port = rawhttp._split_hostport(
-        u.netloc, req.scheme)  # noqa: SLF001 (internal helper reuse)
+    req.host, req.port = rawhttp.split_hostport(u.netloc, req.scheme)
     req.target = (u.path or "/") + (f"?{u.query}" if u.query else "")
     req.set_header("Host", req.authority)
 
@@ -83,7 +82,7 @@ def classify(resp: rawhttp.Response, args) -> tuple[str, str]:
         return "error", resp.error
     text = resp.text(4096)
     if args.fail_regex and re.search(args.fail_regex, text, re.I):
-        return "rejected", f"matched --fail-regex"
+        return "rejected", "matched --fail-regex"
     if args.success_regex:
         if re.search(args.success_regex, text, re.I):
             return "accepted", "matched --success-regex"
@@ -131,15 +130,13 @@ def extract_locations(resp: rawhttp.Response, filename: str) -> list[str]:
 # --------------------------------------------------------------------------- #
 # Filenames
 # --------------------------------------------------------------------------- #
-def payload_filename(entry: ManifestEntry, template_name: str | None) -> str:
-    """Pick the filename sent for a payload.
+def payload_filename(entry: ManifestEntry) -> str:
+    """The filename sent for a payload.
 
-    Keeps the generated basename (which already encodes the technique, e.g.
-    ``poc.php.png``) but borrows the extension from the captured request when
-    that request used a specific one and the payload is extension-agnostic.
+    Keeps the generated basename, which already encodes the technique and the
+    extension under test (e.g. ``poc.php.png``, ``shell.phtml``).
     """
-    base = os.path.basename(entry.path)
-    return base
+    return os.path.basename(entry.path)
 
 
 # --------------------------------------------------------------------------- #
@@ -206,8 +203,30 @@ def build_parser() -> argparse.ArgumentParser:
                      help="do not write results back into index.json")
     out.add_argument("--dry-run", action="store_true",
                      help="show what would be uploaded without sending")
+    out.add_argument("-y", "--yes", action="store_true",
+                     help="confirm you are authorized to send destructive "
+                          "payloads (decompression bombs etc.) at this target")
     out.add_argument("-q", "--quiet", action="store_true")
     return p
+
+
+def confirm_destructive(entries, args) -> bool:
+    """Destructive payloads can degrade the target, so sending them needs the
+    same explicit authorization the generator demands to create them."""
+    hits = [e for e in entries if e.risk == "destructive"]
+    if not hits or args.yes or args.dry_run:
+        return True
+    names = ", ".join(e.path for e in hits[:5])
+    msg = (f"{len(hits)} destructive payload(s) selected ({names}"
+           f"{', …' if len(hits) > 5 else ''}). These can degrade or crash the "
+           f"target.")
+    if not sys.stdin.isatty():
+        print(f"error: {msg} Pass -y to confirm you are authorized, or filter "
+              f"with --risk safe/active.", file=sys.stderr)
+        return False
+    print(msg)
+    ans = input("Confirm you are authorized to send them at this target [y/N]: ")
+    return ans.strip().lower() in ("y", "yes")
 
 
 def main(argv=None) -> int:
@@ -227,6 +246,9 @@ def main(argv=None) -> int:
     )
     if args.limit:
         entries = entries[:args.limit]
+
+    if not confirm_destructive(entries, args):
+        return 2
 
     if not args.quiet:
         where = "multipart field %r" % template.field if template.is_multipart \
@@ -252,7 +274,7 @@ def main(argv=None) -> int:
             if not args.quiet:
                 print(f"[!] {entry.path}: cannot read ({e})")
             continue
-        filename = payload_filename(entry, template.original_filename)
+        filename = payload_filename(entry)
         req = template.render(data, filename, content_type=args.content_type)
         resp = rawhttp.send(req, timeout=args.timeout, proxy=args.proxy,
                             verify=args.verify_tls,

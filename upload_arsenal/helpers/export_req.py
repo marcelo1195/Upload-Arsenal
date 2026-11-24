@@ -107,7 +107,7 @@ def main(argv=None) -> int:
             data = man.read_bytes(entry)
         except OSError:
             continue
-        filename = payload_filename(entry, template.original_filename)
+        filename = payload_filename(entry)
         req = template.render(data, filename, content_type=args.content_type)
         raw = req.to_bytes(version=args.version_line)
         name = _safe_name(entry.path) + ".req"

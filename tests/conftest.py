@@ -21,6 +21,19 @@ def suite(tmp_path):
     return tmp_path / "suite"
 
 
+@pytest.fixture
+def ctf_suite(tmp_path):
+    """A ctf-profile suite, which is the only one that emits destructive payloads."""
+    ctx = core.Context(
+        profile=core.PROFILES["ctf"], target=core.TARGETS["generic"],
+        languages=core.TARGETS["generic"].languages,
+        lhost="10.0.0.1", lport=4444,
+    )
+    res = generator.run(ctx)
+    generator.write(res, str(tmp_path / "ctf"))
+    return tmp_path / "ctf"
+
+
 class _RecordingServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     allow_reuse_address = True

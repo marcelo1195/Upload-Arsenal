@@ -60,28 +60,32 @@ def _rename_schemes(basename: str, stem: str, ext: str, *, now) -> list[str]:
 
 
 def candidate_urls(base_url: str, filename: str, dirs, *, date_dirs=True) -> list[str]:
-    stem, ext = os.path.splitext(filename)
+    """Candidate URLs, ordered most-likely-first.
+
+    Ordering matters because callers cap the number of probes: it is
+    name-major, so the *unchanged* filename is tried in **every** directory
+    before any rename scheme is attempted. Directory-major ordering would
+    spend the whole budget on the first few directories and never probe
+    common ones like ``wp-content/uploads/`` at all.
+    """
     # strip filter-bypass junk so the "stored" name is realistic
-    ext = re.sub(r"(%00|%20|%0a|%0d|::\$DATA|\.).*$", "", ext) or ext
     clean = re.sub(r"(%00|%20|%0a|%0d|::\$DATA)", "", filename)
     now = time.time()
     names = _rename_schemes(clean, os.path.splitext(clean)[0],
                             os.path.splitext(clean)[1], now=now)
+    utc = _dt.datetime.fromtimestamp(now, _dt.timezone.utc)
+    shards = [""]
+    if date_dirs:
+        shards += [utc.strftime("%Y/%m/%d/"), utc.strftime("%Y-%m/")]
     base = base_url.rstrip("/") + "/"
     urls, seen = [], set()
-    for d in dirs:
-        for name in names:
-            url = base + d + name
-            if url not in seen:
-                seen.add(url)
-                urls.append(url)
-            if date_dirs:
-                for shard in (_dt.datetime.fromtimestamp(now, _dt.timezone.utc).strftime("%Y/%m/%d/"),
-                              _dt.datetime.fromtimestamp(now, _dt.timezone.utc).strftime("%Y-%m/")):
-                    u2 = base + d + shard + name
-                    if u2 not in seen:
-                        seen.add(u2)
-                        urls.append(u2)
+    for name in names:
+        for shard in shards:
+            for d in dirs:
+                url = base + d + shard + name
+                if url not in seen:
+                    seen.add(url)
+                    urls.append(url)
     return urls
 
 
@@ -178,17 +182,16 @@ def _auth_headers(tmpl: rawhttp.RawRequest | None) -> list:
 
 
 def _probe(url: str, headers, args) -> rawhttp.Response:
-    req = rawhttp.parse_raw_request(
-        f"GET / HTTP/1.1\r\nHost: placeholder\r\n\r\n")
-    # rebuild from URL
     from urllib.parse import urlsplit
     u = urlsplit(url)
-    req.scheme = u.scheme or "https"
-    req.host, req.port = rawhttp._split_hostport(u.netloc, req.scheme)  # noqa: SLF001
-    req.target = (u.path or "/") + (f"?{u.query}" if u.query else "")
+    scheme = u.scheme or "https"
+    host, port = rawhttp.split_hostport(u.netloc, scheme)
+    req = rawhttp.RawRequest(
+        method="GET",
+        target=(u.path or "/") + (f"?{u.query}" if u.query else ""),
+        scheme=scheme, host=host, port=port,
+    )
     req.headers = [("Host", req.authority)] + list(headers)
-    req.method = "GET"
-    req.body = b""
     return rawhttp.send(req, timeout=args.timeout, proxy=args.proxy,
                         verify=args.verify_tls, follow_redirects=True)
 
@@ -255,7 +258,6 @@ def main(argv=None) -> int:
             if entry is not None and man:
                 if hit_url not in entry.found_at:
                     entry.found_at.append(hit_url)
-                entry.callback = entry.callback  # no-op keep
                 man.save()
             if not args.quiet:
                 print(f"[+] FOUND  {name:40} -> {hit_url}")

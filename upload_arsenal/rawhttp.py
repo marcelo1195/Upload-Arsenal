@@ -12,6 +12,7 @@ from __future__ import annotations
 import gzip
 import http.client
 import mimetypes
+import os
 import re
 import socket
 import ssl
@@ -202,12 +203,12 @@ def parse_raw_request(data: bytes | str, *, scheme: str | None = None,
         raise RawRequestError("no Host header and no absolute URL in request line")
     if not req.get_header("Host"):
         req.headers.insert(0, ("Host", hostport))
-    host, port = _split_hostport(hostport, req.scheme)
+    host, port = split_hostport(hostport, req.scheme)
     req.host, req.port = host, port
     return req
 
 
-def _split_hostport(hostport: str, scheme: str) -> tuple[str, int]:
+def split_hostport(hostport: str, scheme: str) -> tuple[str, int]:
     default = 443 if scheme == "https" else 80
     if hostport.startswith("["):                  # IPv6 literal
         end = hostport.find("]")
@@ -322,6 +323,20 @@ def parse_multipart(body: bytes, boundary: str) -> list[Part]:
     return parts
 
 
+def boundary_collides(parts: list[Part], boundary: str) -> bool:
+    """True if any part's body contains the delimiter, which would corrupt it."""
+    delim = b"--" + boundary.encode("latin-1")
+    return any(delim in p.data for p in parts)
+
+
+def fresh_boundary(parts: list[Part]) -> str:
+    """A boundary that appears in no part body."""
+    while True:
+        cand = "----uploadArsenal" + os.urandom(12).hex()
+        if not boundary_collides(parts, cand):
+            return cand
+
+
 def build_multipart(parts: list[Part], boundary: str) -> bytes:
     out = bytearray()
     b = boundary.encode("latin-1")
@@ -410,7 +425,8 @@ class UploadTemplate:
             if "{filename}" in req.target:
                 req.target = req.target.replace("{filename}", filename)
             return req
-        parts = parse_multipart(req.body, req.boundary)
+        boundary = req.boundary
+        parts = parse_multipart(req.body, boundary)
         for p in parts:
             if p.name == self.field:
                 p.set_filename(filename)
@@ -420,7 +436,18 @@ class UploadTemplate:
                 elif content_type not in (None, "keep"):
                     p.set_header("Content-Type", content_type)
                 break
-        req.body = build_multipart(parts, req.boundary)
+        # A payload whose bytes contain the captured delimiter would truncate
+        # the part and inject a bogus one — the server would store a corrupt
+        # file and the test would read as a false negative. Re-key the body on
+        # a boundary that does not occur in any part instead.
+        if boundary_collides(parts, boundary):
+            boundary = fresh_boundary(parts)
+            ct = re.sub(r'boundary=("?)[^";]+\1', f"boundary={boundary}",
+                        req.content_type, count=1)
+            if f"boundary={boundary}" not in ct:
+                ct = f"{ct.split(';')[0]}; boundary={boundary}"
+            req.set_header("Content-Type", ct)
+        req.body = build_multipart(parts, boundary)
         return req
 
 
@@ -502,7 +529,7 @@ def redirect_request(req: RawRequest, location: str, status: int) -> RawRequest:
     u = urlsplit(location)
     if u.scheme:
         nxt.scheme = u.scheme
-        nxt.host, nxt.port = _split_hostport(u.netloc, u.scheme)
+        nxt.host, nxt.port = split_hostport(u.netloc, u.scheme)
         nxt.set_header("Host", nxt.authority)
     path = u.path or "/"
     if not path.startswith("/"):
@@ -525,7 +552,7 @@ def _send_once(req: RawRequest, timeout: float, proxy: str | None,
     target = req.target
     if proxy:
         pu = urlsplit(proxy if "://" in proxy else f"http://{proxy}")
-        phost, pport = _split_hostport(pu.netloc, "http")
+        phost, pport = split_hostport(pu.netloc, "http")
         if req.scheme == "https":
             conn = http.client.HTTPSConnection(phost, pport, timeout=timeout, context=ctx)
             conn.set_tunnel(req.host, req.port)
