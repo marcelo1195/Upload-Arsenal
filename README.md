@@ -90,6 +90,103 @@ file_upload_suite/
 └── wordlists/         # content-type + fuzz/ (param names, filenames, traversal, ssrf)
 ```
 
+The field helpers add, in the same directory: `upload_results.{json,html}`
+(uploader), `callbacks.jsonl` (callback listener) and `requests/` (exporter),
+and they annotate `index.json` with per-payload `result`, `callback` and
+`found_at` data.
+
+## Field helpers (upload / callback / hunt / export)
+
+Once a suite is generated, four helper CLIs operate on its `index.json`
+manifest so uploading, catching callbacks and locating stored files all share
+one source of truth. They are pure-stdlib and authorized-use only.
+
+### 1. Automatic uploader — `upload-arsenal-upload`
+
+Uploads every payload to the target and records the server's response per
+payload (written back into `index.json` and an `upload_results.{json,html}`
+report). The endpoint, headers, **auth cookies/tokens**, multipart boundary
+and file field are taken from a **raw `request.txt` copied straight from Burp
+Suite or Caido** — only the file bytes/filename are swapped per payload, so
+every request carries the exact session you captured.
+
+```bash
+# Copy the upload request in Burp/Caido ("Copy to file") -> request.txt
+upload-arsenal-upload -m suite -r request.txt --risk safe
+upload-arsenal-upload -m suite -r request.txt --proxy http://127.0.0.1:8080
+upload-arsenal-upload -m suite -r request.txt \
+    --success-regex 'upload (ok|complete)' --fail-regex 'not allowed'
+```
+
+If the request has several file parts, pick one with `--field <name>`; for raw
+PUT/body uploads use `--raw-body`. `--scheme http|https` forces the scheme when
+the captured request omits it (proxy copies usually do).
+
+### 2. Callback verifier — `upload-arsenal-callback`
+
+HTTP (and optional DNS) listener for SSRF / blind-XXE / SVG-SSRF / call-home
+payloads. `--arm` rewrites each OOB payload so its callback URL carries a
+unique per-payload token, so an incoming hit is mapped to exactly one payload
+and marked in the manifest. Works in two shapes:
+
+```bash
+# VPS with a public IP — HTTP + DNS, armed:
+upload-arsenal-callback -m suite --public-host 1.2.3.4 \
+    --arm --dns --dns-domain oob.example.com
+
+# Home box behind NAT, via an already-running `ngrok http 8000`:
+upload-arsenal-callback -m suite --use-ngrok --arm
+# or let it start ngrok (reads the local API at 127.0.0.1:4040):
+upload-arsenal-callback -m suite --ngrok --arm
+```
+
+> **ngrok limitation (stated honestly).** ngrok's HTTP tunnel forwards **HTTP
+> only**. HTTP-based OOB works through it — classic SSRF, SVG-SSRF, and the
+> blind-XXE `evil.dtd` that exfiltrates over `http://host/?x=…`. A **DNS-only**
+> callback (a resolver looking up `token.attacker.tld`) does **not** traverse
+> an ngrok HTTP tunnel; it needs a real public IP plus an NS-delegated domain.
+> `--dns` is therefore refused in ngrok mode instead of silently doing nothing.
+
+### 3. Stored-file hunter — `upload-arsenal-hunt`
+
+After a file is accepted, finds *where it landed* by probing common storage
+directories and server-side rename schemes (timestamp, hash, sanitised,
+date-sharded …), confirming each hit by a payload marker (not just a 200).
+Reuses `request.txt` for scheme/host/auth.
+
+```bash
+# hunt everything the uploader marked "accepted":
+upload-arsenal-hunt -m suite -r request.txt
+# or a specific stored name / base path:
+upload-arsenal-hunt -m suite --base-url https://cdn.target/uploads/ \
+    --filename poc.php.png --extra-dir incoming/
+```
+
+Located URLs are written back to the manifest (`found_at`).
+
+### 4. Raw-request exporter — `upload-arsenal-export`
+
+Exports each payload as a ready-to-send `.req` (built on `request.txt`) for
+**Burp Repeater** ("Paste from file") and **ffuf/wfuzz** (`-request`):
+
+```bash
+upload-arsenal-export -m suite -r request.txt -o reqs/ --ffuf-template --curl
+# ffuf per payload:  for r in reqs/*.req; do ffuf -request "$r" -request-proto https; done
+```
+
+`--ffuf-template` also emits `upload_FUZZ.req` + `payloads.txt`; `--curl`
+writes a `replay.sh`. See `reqs/INDEX.txt` for the `.req` → payload mapping.
+
+### Typical workflow
+
+```bash
+upload-arsenal --profile pentest --target apache-php --callback-host oob.example.com -y
+upload-arsenal-callback -m file_upload_suite --public-host <ip> --arm &   # or --ngrok
+upload-arsenal-upload   -m file_upload_suite -r request.txt
+upload-arsenal-hunt     -m file_upload_suite -r request.txt
+upload-arsenal-export   -m file_upload_suite -r request.txt -o reqs/
+```
+
 ## Legacy compatibility
 
 The old `arsenal.py -poc / -exploit / --rev-shell / -obfuscate` flags still work
